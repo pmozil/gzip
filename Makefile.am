@@ -31,41 +31,41 @@ nodist_libver_a_SOURCES = version.c version.h
 DISTCLEANFILES = version.c version.h
 
 if LESS
-ZLESS_MAN = zless.1
-ZLESS_PROG = zless
+ZLESS_MAN = zless_cxu.1
+ZLESS_PROG = zless_cxu
 else
 ZLESS_MAN =
 ZLESS_PROG =
 endif
 
-man_MANS = gunzip.1 gzexe.1 gzip.1 \
-  zcat.1 zcmp.1 zdiff.1 zforce.1 zgrep.1 $(ZLESS_MAN) zmore.1 znew.1
+man_MANS = gunzip_cxu.1 gzexe_cxu.1 gzip_cxu.1 \
+  zcat_cxu.1 zcmp_cxu.1 zdiff_cxu.1 zforce_cxu.1 zgrep_cxu.1 $(ZLESS_MAN) zmore_cxu.1 znew_cxu.1
 
 EXTRA_DIST = $(ACINCLUDE_INPUTS) $(man_MANS) \
   ChangeLog-2007 \
   cfg.mk	\
   dist-check.mk	\
-  algorithm.doc \
-  gunzip.in gzexe.in gzip.doc \
+  algorithm_cxu.doc \
+  gunzip_cxu.in gzexe_cxu.in gzip_cxu.doc \
   revision.h \
   sample/ztouch sample/add.c sample/sub.c sample/zread.c sample/zfile \
   tailor.h \
-  zcat.in zcmp.in zdiff.in \
-  zegrep.in zfgrep.in zforce.in zgrep.in zless.in zmore.in znew.in
+  zcat_cxu.in zcmp_cxu.in zdiff_cxu.in \
+  zegrep_cxu.in zfgrep_cxu.in zforce_cxu.in zgrep_cxu.in zless_cxu.in zmore_cxu.in znew_cxu.in
 noinst_HEADERS = deflate.h gzip.h lzw.h
 
-bin_PROGRAMS = gzip
-bin_SCRIPTS = gunzip gzexe zcat zcmp zdiff \
-  zegrep zfgrep zforce zgrep $(ZLESS_PROG) zmore znew
-gzip_SOURCES = \
+bin_PROGRAMS = gzip_cxu
+bin_SCRIPTS = gunzip_cxu gzexe_cxu zcat_cxu zcmp_cxu zdiff_cxu \
+  zegrep_cxu zfgrep_cxu zforce_cxu zgrep_cxu $(ZLESS_PROG) zmore_cxu znew_cxu
+gzip_cxu_SOURCES = \
   bits.c deflate.c gzip.c inflate.c \
   trees.c unlzh.c unlzw.c unpack.c unzip.c util.c zip.c
-gzip_LDADD = libver.a lib/libgzip.a
-gzip_LDADD += $(CLOCK_TIME_LIB) $(FDATASYNC_LIB)
+gzip_cxu_LDADD = libver.a lib/libgzip.a
+gzip_cxu_LDADD += $(CLOCK_TIME_LIB) $(FDATASYNC_LIB)
 # gnulib-tool also recommends $(MBRTOWC_LIB) and $(LIBINTL), but
 # modules needing those libraries are avoided so the libraries can be omitted.
 if IBM_Z_DFLTCC
-gzip_SOURCES += dfltcc.c
+gzip_cxu_SOURCES += dfltcc.c
 endif
 
 BUILT_SOURCES += version.c
@@ -84,12 +84,12 @@ version.h: Makefile
 	$(AM_V_at)chmod a-w $@t
 	$(AM_V_at)mv $@t $@
 
-gzip.doc: gzip.1
-	$(AM_V_GEN)groff -man -Tascii $(srcdir)/gzip.1 | col -b | uniq > $@-t \
-	  && mv $@-t $(srcdir)/gzip.doc
+gzip_cxu.doc: gzip_cxu.1
+	$(AM_V_GEN)groff -man -Tascii $(srcdir)/gzip_cxu.1 | col -b | uniq > $@-t \
+	  && mv $@-t $(srcdir)/gzip_cxu.doc
 
-gzip.doc.gz: gzip.doc $(bin_PROGRAMS)
-	$(AM_V_GEN)./gzip < $(srcdir)/gzip.doc >$@-t && mv $@-t $@
+gzip_cxu.doc.gz: gzip_cxu.doc $(bin_PROGRAMS)
+	$(AM_V_GEN)./gzip < $(srcdir)/gzip_cxu.doc >$@-t && mv $@-t $@
 
 SUFFIXES = .in
 .in:
@@ -126,13 +126,13 @@ new_path = PATH=.$(PATH_SEPARATOR)$$PATH
 # A simple test, just of gzip -- more of a sanity check than anything else.
 FILES_TO_CHECK = $(bin_SCRIPTS) \
   $(top_srcdir)/ChangeLog $(top_srcdir)/configure $(top_srcdir)/gzip.c
-check-local: $(FILES_TO_CHECK) $(bin_PROGRAMS) gzip.doc.gz
+check-local: $(FILES_TO_CHECK) $(bin_PROGRAMS) gzip_cxu.doc.gz
 	$(AM_V_GEN)$(new_path); { test '$(srcdir)' != . \
-				    || zdiff gzip.doc.gz; }
-	$(AM_V_at)$(new_path); zdiff $(srcdir)/gzip.doc $(srcdir)/gzip.doc
-	$(AM_V_at)$(new_path); zdiff $(srcdir)/gzip.doc gzip.doc.gz
-	$(AM_V_at)$(new_path); zdiff - $(srcdir)/gzip.doc <gzip.doc.gz
-	$(AM_V_at)$(new_path); zdiff gzip.doc.gz gzip.doc.gz
+				    || zdiff gzip_cxu.doc.gz; }
+	$(AM_V_at)$(new_path); zdiff $(srcdir)/gzip_cxu.doc $(srcdir)/gzip_cxu.doc
+	$(AM_V_at)$(new_path); zdiff $(srcdir)/gzip_cxu.doc gzip_cxu.doc.gz
+	$(AM_V_at)$(new_path); zdiff - $(srcdir)/gzip_cxu.doc <gzip_cxu.doc.gz
+	$(AM_V_at)$(new_path); zdiff gzip_cxu.doc.gz gzip_cxu.doc.gz
 	$(AM_V_at)$(new_path); zgrep -iV >/dev/null
 	$(AM_V_at)$(new_path);				\
 	for opt in --rsyncable '' -1 -9; do		\
@@ -147,7 +147,7 @@ install-exec-hook remove-installed-links:
 	@for prog_ext in $(bin_PROGRAMS) $(bin_SCRIPTS); do \
 	  prog=`echo "$$prog_ext"|sed 's/$(EXEEXT)$$//'`; \
 	  case $$prog in \
-	  gunzip) aliases='uncompress';; \
+	  gunzip_cxu) aliases='uncompress';; \
 	  *) continue;; \
 	  esac; \
 	  transform='$(transform)'; \
@@ -174,10 +174,10 @@ ALL_RECURSIVE_TARGETS += distcheck-hook
 distcheck-hook:
 	$(MAKE) my-distcheck
 
-MAINTAINERCLEANFILES = gzip.doc
+MAINTAINERCLEANFILES = gzip_cxu.doc
 
-MOSTLYCLEANFILES = _match.i match_.s _match.S gzip.doc.gz \
-  gunzip gzexe zcat zcmp zdiff zegrep zfgrep zforce zgrep zless zmore znew
+MOSTLYCLEANFILES = _match.i match_.s _match.S gzip_cxu.doc.gz \
+  gunzip_cxu gzexe_cxu zcat_cxu zcmp_cxu zdiff_cxu zegrep_cxu zfgrep_cxu zforce_cxu zgrep_cxu zless_cxu zmore_cxu znew_cxu
 
 # gzip, zdiff and zgrep are used by installed scripts, and installed names
 # might be transformed by 'configure' options like --program-transform-name.
