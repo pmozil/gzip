@@ -58,8 +58,9 @@ bin_PROGRAMS = gzip_cxu
 bin_SCRIPTS = gunzip_cxu gzexe_cxu zcat_cxu zcmp_cxu zdiff_cxu \
   zegrep_cxu zfgrep_cxu zforce_cxu zgrep_cxu $(ZLESS_PROG) zmore_cxu znew_cxu
 gzip_cxu_SOURCES = \
-  bits.c deflate.c gzip.c inflate.c \
-  trees.c unlzh.c unlzw.c unpack.c unzip.c util.c zip.c
+  bits.c deflate.c gzip.c \
+  trees.c unlzh.c unlzw.c unpack.c unzip.c \
+  util.c zip.c inflate_cxu.c
 gzip_cxu_LDADD = libver.a lib/libgzip.a
 gzip_cxu_LDADD += $(CLOCK_TIME_LIB) $(FDATASYNC_LIB)
 # gnulib-tool also recommends $(MBRTOWC_LIB) and $(LIBINTL), but
