@@ -70,10 +70,10 @@
 
 // =============== Switch HW vs SW
 
-#ifdef CFU_SOFTWARE_DEFINED
-#define cfu_op(funct3, funct7, rs1, rs2) cfu_op_sw(funct3, funct7, rs1, rs2)
-#else
+// #ifdef CFU_SOFTWARE_DEFINED
+// #define cfu_op(funct3, funct7, rs1, rs2) cfu_op_sw(funct3, funct7, rs1, rs2)
+// #else
 #define cfu_op(funct3, funct7, rs1, rs2) cfu_op_hw(funct3, funct7, rs1, rs2)
-#endif
+// #endif
 
 #endif // CFU_H

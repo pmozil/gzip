@@ -65,9 +65,11 @@
  *
  */
 
+#include " -Waddress"
 #include <config.h>
 #include <ctype.h>
 
+#include "cxu_opt_funcs.h"
 #include "tailor.h"
 #include "gzip.h"
 
@@ -403,7 +405,11 @@ ct_init (ush *attr, int *methodp)
     /* The static distance tree is trivial: */
     for (n = 0; n < D_CODES; n++) {
         static_dtree[n].Len = 5;
-        static_dtree[n].Code = bi_reverse(n, 5);
+        // static_dtree[n].Code = bi_reverse(n, 5);
+
+        uint32_t raw = n;
+        uint32_t rev = cxu_bitrev(raw);
+        static_dtree[n].Code = rev >> 27;
     }
 
     /* Initialize the first block of the first file: */
@@ -604,7 +610,11 @@ gen_codes (ct_data near *tree, int max_code)
         int len = tree[n].Len;
         if (len == 0) continue;
         /* Now reverse the bits */
-        tree[n].Code = bi_reverse(next_code[len]++, len);
+        // tree[n].Code = bi_reverse(next_code[len]++, len);
+
+        uint32_t raw = n;
+        uint32_t rev = cxu_bitrev(raw);
+        tree[n].Code = rev >> (32 - len);
 
         Tracec(tree != static_ltree, (stderr,"\nn %3d %c l %2d c %4x (%x) ",
              n, (isgraph(n) ? n : ' '), len, tree[n].Code, next_code[len]-1u));
