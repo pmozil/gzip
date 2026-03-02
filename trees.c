@@ -65,7 +65,6 @@
  *
  */
 
-#include " -Waddress"
 #include <config.h>
 #include <ctype.h>
 
@@ -612,7 +611,7 @@ gen_codes (ct_data near *tree, int max_code)
         /* Now reverse the bits */
         // tree[n].Code = bi_reverse(next_code[len]++, len);
 
-        uint32_t raw = n;
+        uint32_t raw = next_code[len]++;
         uint32_t rev = cxu_bitrev(raw);
         tree[n].Code = rev >> (32 - len);
 
