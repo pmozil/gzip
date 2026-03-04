@@ -4,7 +4,6 @@
 
 #include "cfu.h"
 #include "gzip.h"
-#include "cxu_runtime.h"
 
 /* FN 0 — bitrev: reverses 32 bits */
 static inline unsigned cxu_bitrev(unsigned n)
