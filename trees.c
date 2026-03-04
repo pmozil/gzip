@@ -75,6 +75,7 @@
 /* ===========================================================================
  * Constants
  */
+typedef unsigned long ulg;
 
 #define MAX_BITS 15
 /* All codes must not exceed MAX_BITS bits */
