@@ -3,6 +3,7 @@
 #define CXU_HELPERS_H
 
 #include "cfu.h"
+#include "gizp.h"
 #include "cxu_runtime.h"
 
 /* ==========================================================================
