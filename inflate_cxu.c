@@ -79,15 +79,6 @@ static ush mask_bits[] = {
 #  define NEXTBYTE() (uch)GETBYTE()
 #endif
 
- *
- *  bstate_t carries both the packed CXU bit-state word and the cached window
- *  position.  Every function that touches the bit stream works on a local
- *  bstate_t and receives / returns it explicitly.  The globals bb/bk/wp are
- *  only loaded/stored at the boundaries where huft_build (which does not use
- *  the bit stream) might indirectly call fill_inbuf (which checks wp).
- *
- *  Packed word layout: [31:24]=bk  [23:0]=bb
- */
 typedef struct { uint32_t bs; unsigned w; } bstate_t;
 
 static inline bstate_t bs_from_globals(void)
