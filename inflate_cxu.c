@@ -1,22 +1,3 @@
-/* inflate.c — Inflate deflated data, with CFU hardware acceleration.
- *
- * Based on the original gzip inflate.c:
- *   Copyright (C) 1997-1999, 2002, 2006, 2009-2013 Free Software Foundation
- *   Original inflate algorithm: Mark Adler, "Not copyrighted 1992"
- *
- * CFU acceleration layer:
- *   All NEEDBITS / DUMPBITS / bit-peek operations are handled by the CXU
- *   via cfu_inflate.h.  No CXU state registers are used; the bit-buffer
- *   state travels in a single packed 32-bit RISC-V register between calls.
- *
- *   Packed bit-state word layout:
- *     [31:24] = bk  (number of valid bits in the buffer)
- *     [23: 0] = bb  (bit buffer, low 24 bits)
- *
- * Everything that does NOT touch the bit stream (huft_build, huft_free,
- * the sliding-window copy, CRC, I/O) is unchanged from the original.
- */
-
 #include <config.h>
 #include "tailor.h"
 #include <stdlib.h>
@@ -25,29 +6,23 @@
 
 #define slide window
 
-/* ── huft entry ─────────────────────────────────────────────────────────── */
 struct huft {
-  uch e;                /* extra bits / operation code */
-  uch b;                /* bits in this code or subcode */
+  uch e;
+  uch b;
   union {
-    ush n;              /* literal, length base, or distance base */
-    struct huft *t;     /* pointer to next level of table */
+    ush n;
+    struct huft *t;
   } v;
 };
 
 static int huft_free(struct huft *);
 
-/* ── Window position (wp) and global bit-buffer (bb/bk) ─────────────────── */
-/* wp is aliased to outcnt via the macro below, exactly as in the original.  */
 #define wp outcnt
 #define flush_output(w) (wp = (w), flush_window())
 
-/* The global bit-buffer pair.  Functions copy these to a packed local state
- * at entry and flush them back at exit, just as the original used local b,k. */
-static ulg      bb;   /* bit buffer           */
-static unsigned bk;   /* bits in bit buffer   */
+static ulg      bb;
+static unsigned bk;
 
-/* ── Deflate tables (unchanged) ─────────────────────────────────────────── */
 static unsigned border[] = {
         16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15};
 
@@ -69,19 +44,15 @@ static ush cpdext[] = {
         7, 7, 8, 8, 9, 9, 10, 10, 11, 11,
         12, 12, 13, 13};
 
-/* ── Lookup-table parameters ─────────────────────────────────────────────── */
 static int lbits = 9;
 static int dbits = 6;
 
-/* ── mask_bits[] — still needed by huft_build and by the original GETBYTE
- *   macro chain; the CXU replicates this ROM internally. ───────────────── */
 static ush mask_bits[] = {
     0x0000,
     0x0001, 0x0003, 0x0007, 0x000f, 0x001f, 0x003f, 0x007f, 0x00ff,
     0x01ff, 0x03ff, 0x07ff, 0x0fff, 0x1fff, 0x3fff, 0x7fff, 0xffff
 };
 
-/* ── Byte-fetch helpers (unchanged from original) ───────────────────────── */
 #define GETBYTE() \
     (inptr < insize ? inbuf[inptr++] : (wp = w, fill_inbuf(0)))
 
@@ -93,41 +64,12 @@ static ush mask_bits[] = {
 #  define NEXTBYTE() (uch)GETBYTE()
 #endif
 
-/* ── CXU bit-state macros ───────────────────────────────────────────────── */
-/*
- * _bs  — packed bit-state living in a local uint32_t.
- *
- * BS_INIT()  — load globals bb,bk → _bs at function entry.
- * BS_SAVE()  — flush _bs → globals bb,bk at function exit.
- *
- * NEEDBITS_HW(n)  — ensure ≥n bits are available (loops calling NEXTBYTE).
- * DUMPBITS_HW(n)  — consume n bits.
- * PEEKBITS_HW(n)  — read low n bits of bb (non-destructive).
- * HUFT_IDX(bl)    — bb & mask_bits[bl], the Huffman table row index.
- *
- * These are defined in cfu_inflate.h; repeated here as a reminder:
- *
- *   BS_DECL()      uint32_t _bs;
- *   BS_INIT()      _bs = cfu_pack(bb, bk)
- *   BS_SAVE()      bb = cfu_bb(_bs); bk = cfu_bk(_bs)
- *
- *   NEEDBITS_HW(n) while (cfu_need_check(_bs,n)) _bs=cfu_load_byte(_bs,NEXTBYTE())
- *   DUMPBITS_HW(n) _bs = cfu_dump(_bs, n)
- *   PEEKBITS_HW(n) cfu_peek(_bs, n)
- *   HUFT_IDX(bl)   cfu_huft_idx(cfu_bb(_bs), bl)
- */
-
-/* Shorthand used inside this file only. */
 #define HUFT_IDX(bl)   cfu_huft_idx(cfu_bb(_bs), (unsigned)(bl))
 
-/* ── hufts memory tracker ────────────────────────────────────────────────── */
 #define BMAX 16
 #define N_MAX 288
 static unsigned hufts;
 
-/* ═══════════════════════════════════════════════════════════════════════════
- * huft_build — unchanged from original.
- * ═══════════════════════════════════════════════════════════════════════════ */
 static int
 huft_build(unsigned *b, unsigned n, unsigned s,
            ush *d, ush *e,
@@ -268,9 +210,6 @@ huft_build(unsigned *b, unsigned n, unsigned s,
   return y != 0 && g != 1;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
- * huft_free — unchanged from original.
- * ═══════════════════════════════════════════════════════════════════════════ */
 static int
 huft_free(struct huft *t)
 {
@@ -284,9 +223,6 @@ huft_free(struct huft *t)
   return 0;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
- * inflate_codes — hot inner loop, fully CXU-accelerated.
- * ═══════════════════════════════════════════════════════════════════════════ */
 static int
 inflate_codes(struct huft *tl, struct huft *td, int bl, int bd)
 {
@@ -294,15 +230,13 @@ inflate_codes(struct huft *tl, struct huft *td, int bl, int bd)
   unsigned n, d;
   unsigned w;
   struct huft *t;
-  BS_DECL();   /* uint32_t _bs */
+  BS_DECL();
 
-  /* Load globals into local packed state and window position. */
   BS_INIT();
   w = wp;
 
   for (;;) {
 
-    /* ── Decode one literal/length symbol ──────────────────────────────── */
     NEEDBITS_HW((unsigned)bl);
     t = tl + HUFT_IDX(bl);
     e = t->e;
@@ -319,7 +253,6 @@ inflate_codes(struct huft *tl, struct huft *td, int bl, int bd)
     DUMPBITS_HW(t->b);
 
     if (e == 16) {
-      /* ── Literal byte ─────────────────────────────────────────────── */
       slide[w++] = (uch)t->v.n;
       Tracevv((stderr, "%c", slide[w-1]));
       if (w == WSIZE) {
@@ -328,16 +261,13 @@ inflate_codes(struct huft *tl, struct huft *td, int bl, int bd)
       }
 
     } else {
-      /* ── Length/distance pair or EOB ──────────────────────────────── */
       if (e == 15)
-        break;   /* end of block */
+        break;
 
-      /* Get length. */
       NEEDBITS_HW(e);
       n = t->v.n + PEEKBITS_HW(e);
       DUMPBITS_HW(e);
 
-      /* Decode distance. */
       NEEDBITS_HW((unsigned)bd);
       t = td + HUFT_IDX(bd);
       e = t->e;
@@ -358,12 +288,9 @@ inflate_codes(struct huft *tl, struct huft *td, int bl, int bd)
       DUMPBITS_HW(e);
       Tracevv((stderr, "\\[%d,%d]", w-d, n));
 
-      /* ── Sliding-window copy ────────────────────────────────────────── */
       do {
-        /* Wrap both pointers into [0, WSIZE). */
         d = cfu_slide_wrap(d, 0);
 
-        /* How many bytes can we copy without wrapping either pointer? */
         e = WSIZE - (d > w ? d : w);
         if (e > n) e = n;
         n -= e;
@@ -390,15 +317,11 @@ inflate_codes(struct huft *tl, struct huft *td, int bl, int bd)
     }
   }
 
-  /* Flush state back to globals. */
   wp = w;
   BS_SAVE();
   return 0;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
- * inflate_stored — type 0 (uncompressed) block, CXU-accelerated.
- * ═══════════════════════════════════════════════════════════════════════════ */
 static int
 inflate_stored(void)
 {
@@ -409,13 +332,11 @@ inflate_stored(void)
   BS_INIT();
   w = wp;
 
-  /* Align to byte boundary — dump the sub-byte leftover. */
   {
     unsigned leftover = cfu_bk(_bs) & 7u;
     DUMPBITS_HW(leftover);
   }
 
-  /* Read 16-bit length and its one's-complement check. */
   NEEDBITS_HW(16);
   n = PEEKBITS_HW(16);
   DUMPBITS_HW(16);
@@ -423,11 +344,10 @@ inflate_stored(void)
   NEEDBITS_HW(16);
   if (n != (unsigned)(PEEKBITS_HW(16) ^ 0xffffu)) {
     BS_SAVE();
-    return 1;   /* error in compressed data */
+    return 1;
   }
   DUMPBITS_HW(16);
 
-  /* Copy n raw bytes. */
   while (n--) {
     NEEDBITS_HW(8);
     slide[w++] = (uch)PEEKBITS_HW(8);
@@ -443,10 +363,6 @@ inflate_stored(void)
   return 0;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
- * inflate_fixed — type 1 (fixed Huffman) block.
- * Table setup is software-only; inflate_codes() does the hot work via CXU.
- * ═══════════════════════════════════════════════════════════════════════════ */
 static int
 inflate_fixed(void)
 {
@@ -455,7 +371,6 @@ inflate_fixed(void)
   int bl, bd;
   unsigned l[288];
 
-  /* Build fixed literal/length table. */
   for (i = 0;   i < 144; i++) l[i] = 8;
   for (;         i < 256; i++) l[i] = 9;
   for (;         i < 280; i++) l[i] = 7;
@@ -464,7 +379,6 @@ inflate_fixed(void)
   if ((i = huft_build(l, 288, 257, cplens, cplext, &tl, &bl)) != 0)
     return i;
 
-  /* Build fixed distance table. */
   for (i = 0; i < 30; i++) l[i] = 5;
   bd = 5;
   if ((i = huft_build(l, 30, 0, cpdist, cpdext, &td, &bd)) > 1) {
@@ -472,7 +386,6 @@ inflate_fixed(void)
     return i;
   }
 
-  /* Decode the block. */
   if (inflate_codes(tl, td, bl, bd))
     return 1;
 
@@ -481,10 +394,6 @@ inflate_fixed(void)
   return 0;
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
- * inflate_dynamic — type 2 (dynamic Huffman) block.
- * Header parsing uses CXU; inflate_codes() handles the payload.
- * ═══════════════════════════════════════════════════════════════════════════ */
 static int
 inflate_dynamic(void)
 {
@@ -504,17 +413,16 @@ inflate_dynamic(void)
   BS_INIT();
   w = wp;
 
-  /* ── Read table lengths ──────────────────────────────────────────────── */
   NEEDBITS_HW(5);
-  nl = 257 + PEEKBITS_HW(5);   /* number of literal/length codes */
+  nl = 257 + PEEKBITS_HW(5);
   DUMPBITS_HW(5);
 
   NEEDBITS_HW(5);
-  nd = 1 + PEEKBITS_HW(5);     /* number of distance codes */
+  nd = 1 + PEEKBITS_HW(5);
   DUMPBITS_HW(5);
 
   NEEDBITS_HW(4);
-  nb = 4 + PEEKBITS_HW(4);     /* number of bit-length codes */
+  nb = 4 + PEEKBITS_HW(4);
   DUMPBITS_HW(4);
 
 #ifdef PKZIP_BUG_WORKAROUND
@@ -524,10 +432,9 @@ inflate_dynamic(void)
 #endif
   {
     BS_SAVE();
-    return 1;   /* bad lengths */
+    return 1;
   }
 
-  /* ── Read bit-length-code lengths (3 bits each) ──────────────────────── */
   for (j = 0; j < nb; j++) {
     NEEDBITS_HW(3);
     ll[border[j]] = PEEKBITS_HW(3);
@@ -536,9 +443,6 @@ inflate_dynamic(void)
   for (; j < 19; j++)
     ll[border[j]] = 0;
 
-  /* ── Build decoding table for the code-length alphabet ──────────────── */
-  /* Flush state before calling huft_build (it doesn't touch the bit stream,
-   * but we need wp consistent for error paths). */
   wp = w;
   BS_SAVE();
 
@@ -550,11 +454,9 @@ inflate_dynamic(void)
   if (tl == NULL)
     return 2;
 
-  /* Reload after the huft_build call. */
   BS_INIT();
   w = wp;
 
-  /* ── Read literal/length and distance code lengths ───────────────────── */
   n = nl + nd;
   m = mask_bits[bl];
   i = l = 0;
@@ -569,11 +471,9 @@ inflate_dynamic(void)
     j = td_tmp->v.n;
 
     if (j < 16) {
-      /* Literal code length 0..15. */
       ll[i++] = l = j;
 
     } else if (j == 16) {
-      /* Repeat last length 3..6 times. */
       NEEDBITS_HW(2);
       j = 3 + PEEKBITS_HW(2);
       DUMPBITS_HW(2);
@@ -581,7 +481,6 @@ inflate_dynamic(void)
       while (j--) ll[i++] = l;
 
     } else if (j == 17) {
-      /* 3..10 zero-length codes. */
       NEEDBITS_HW(3);
       j = 3 + PEEKBITS_HW(3);
       DUMPBITS_HW(3);
@@ -590,7 +489,6 @@ inflate_dynamic(void)
       l = 0;
 
     } else {
-      /* j == 18: 11..138 zero-length codes. */
       NEEDBITS_HW(7);
       j = 11 + PEEKBITS_HW(7);
       DUMPBITS_HW(7);
@@ -603,9 +501,8 @@ inflate_dynamic(void)
   huft_free(tl);
 
   wp = w;
-  BS_SAVE();   /* flush before huft_build calls */
+  BS_SAVE();
 
-  /* ── Build literal/length decoding table ─────────────────────────────── */
   bl = lbits;
   if ((i = huft_build(ll, nl, 257, cplens, cplext, &tl, &bl)) != 0) {
     if (i == 1) {
@@ -615,7 +512,6 @@ inflate_dynamic(void)
     return i;
   }
 
-  /* ── Build distance decoding table ──────────────────────────────────── */
   bd = dbits;
   if ((i = huft_build(ll + nl, nd, 0, cpdist, cpdext, &td, &bd)) != 0) {
     if (i == 1) {
@@ -631,7 +527,6 @@ inflate_dynamic(void)
 #endif
   }
 
-  /* ── Decode the block payload (the hot path) ─────────────────────────── */
   {
     int err = inflate_codes(tl, td, bl, bd) ? 1 : 0;
     huft_free(tl);
@@ -640,9 +535,6 @@ inflate_dynamic(void)
   }
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
- * inflate_block — read block header, dispatch to stored/fixed/dynamic.
- * ═══════════════════════════════════════════════════════════════════════════ */
 static int
 inflate_block(int *e)
 {
@@ -653,12 +545,10 @@ inflate_block(int *e)
 
   BS_INIT();
 
-  /* Last-block flag. */
   NEEDBITS_HW(1);
   *e = (int)PEEKBITS_HW(1);
   DUMPBITS_HW(1);
 
-  /* Block type (2 bits). */
   NEEDBITS_HW(2);
   t = PEEKBITS_HW(2);
   DUMPBITS_HW(2);
@@ -669,21 +559,17 @@ inflate_block(int *e)
     case 0: return inflate_stored();
     case 1: return inflate_fixed();
     case 2: return inflate_dynamic();
-    default: return 2;   /* bad block type */
+    default: return 2;
   }
 }
 
-/* ═══════════════════════════════════════════════════════════════════════════
- * inflate — top-level entry point, unchanged in structure.
- * ═══════════════════════════════════════════════════════════════════════════ */
 int
-inflate(void)
+gzip_inflate(void)
 {
   int e;
   int r;
   unsigned h;
 
-  /* Initialise window, global bit-buffer. */
   wp = 0;
   bk = 0;
   bb = 0;
@@ -697,8 +583,6 @@ inflate(void)
       h = hufts;
   } while (!e);
 
-  /* Undo lookahead: align back to a byte boundary.
-   * The next read will be byte-aligned, so discard any partial-byte bits. */
   while (bk >= 8) {
     bk -= 8;
     inptr--;
