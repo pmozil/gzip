@@ -1,19 +1,3 @@
-/* inflate.c — Inflate deflated data, with CFU hardware bit-stream acceleration.
- *
- * Based on the original gzip inflate.c:
- *   Copyright (C) 1997-1999, 2002, 2006, 2009-2013 Free Software Foundation
- *   Original inflate algorithm: Mark Adler, "Not copyrighted 1992"
- *
- * CFU acceleration:
- *   Bit-buffer state is packed into a single uint32_t {bk[7:0], bb[23:0]}
- *   and passed by pointer through the call chain so there is never any
- *   ambiguity about which copy of bb/bk is live.  The globals bb/bk are
- *   only touched at the very top (inflate) and bottom (flush) of each
- *   public entry point.
- *
- *   huft_build / huft_free are pure software and completely unchanged.
- */
-
 #include <config.h>
 #include "tailor.h"
 #include <stdlib.h>
@@ -34,27 +18,23 @@ struct huft {
 static int huft_free(struct huft *);
 
 #define wp outcnt
-#define flush_output(w) (wp = (w), flush_window())
+#define flush_output(w) (wp=(w),flush_window())
 
-static ulg      bb;
+static uint32_t bb;
 static unsigned bk;
 
 static unsigned border[] = {
     16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15};
-
 static ush cplens[] = {
     3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31,
     35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258, 0, 0};
-
 static ush cplext[] = {
     0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2,
     3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0, 99, 99};
-
 static ush cpdist[] = {
     1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193,
     257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145,
     8193, 12289, 16385, 24577};
-
 static ush cpdext[] = {
     0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6,
     7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13};
@@ -68,49 +48,35 @@ static ush mask_bits[] = {
     0x01ff, 0x03ff, 0x07ff, 0x0fff, 0x1fff, 0x3fff, 0x7fff, 0xffff
 };
 
-#define GETBYTE() \
-    (inptr < insize ? inbuf[inptr++] : (wp = w, fill_inbuf(0)))
+#define GETBYTE() (inptr < insize ? inbuf[inptr++] : (wp = w, fill_inbuf(0)))
 
 #ifdef CRYPT
   uch cc;
-#  define NEXTBYTE() \
-     (decrypt ? (cc = GETBYTE(), zdecode(cc), cc) : GETBYTE())
+#  define NEXTBYTE() (decrypt ? (cc = GETBYTE(), zdecode(cc), cc) : GETBYTE())
 #else
 #  define NEXTBYTE() (uch)GETBYTE()
 #endif
 
-typedef struct { uint32_t bs; unsigned w; } bstate_t;
+#define NEEDBITS(n) do { \
+    while (k < (unsigned)(n)) { \
+        uint32_t _s = cfu_load_byte(cfu_pack(b, k), NEXTBYTE()); \
+        b = cfu_bb(_s); k = cfu_bk(_s); \
+    } \
+} while(0)
 
-static inline bstate_t bs_from_globals(void)
-{
-    bstate_t s;
-    s.bs = cfu_pack((uint32_t)bb, (uint32_t)bk);
-    s.w  = (unsigned)wp;
-    return s;
-}
+#define DUMPBITS(n) do { \
+    uint32_t _s = cfu_dump(cfu_pack(b, k), (unsigned)(n)); \
+    b = cfu_bb(_s); k = cfu_bk(_s); \
+} while(0)
 
-static inline void bs_to_globals(bstate_t s)
-{
-    bb = (ulg)     cfu_bb(s.bs);
-    bk = (unsigned)cfu_bk(s.bs);
-    wp = s.w;
-}
-
-#define NEEDBITS(s, n) \
-    while (cfu_need_check((s).bs, (unsigned)(n))) { \
-        (s).bs = cfu_load_byte((s).bs, NEXTBYTE()); \
-    }
-#define DUMPBITS(s, n)   ((s).bs = cfu_dump((s).bs, (unsigned)(n)))
-#define PEEKBITS(s, n)   cfu_peek((s).bs, (unsigned)(n))
-#define HUFT_IDX(s, bl)  cfu_huft_idx(cfu_bb((s).bs), (unsigned)(bl))
+#define HUFT_IDX(bl) cfu_huft_idx(b, (unsigned)(bl))
 
 #define BMAX 16
 #define N_MAX 288
 static unsigned hufts;
 
 static int
-huft_build(unsigned *b, unsigned n, unsigned s,
-           ush *d, ush *e,
+huft_build(unsigned *b, unsigned n, unsigned s, ush *d, ush *e,
            struct huft **t, int *m)
 {
   unsigned a;
@@ -232,66 +198,63 @@ huft_free(struct huft *t)
 }
 
 static int
-inflate_codes(bstate_t *sp, struct huft *tl, struct huft *td, int bl, int bd)
+inflate_codes(struct huft *tl, struct huft *td, int bl, int bd)
 {
   register unsigned e;
   unsigned n, d;
+  unsigned w;
   struct huft *t;
-  bstate_t s = *sp;
-  unsigned w = s.w;
+  uint32_t b;
+  unsigned k;
+
+  b = bb; k = bk; w = wp;
 
   for (;;) {
-
-    NEEDBITS(s, bl);
-    t = tl + HUFT_IDX(s, bl);
+    NEEDBITS(bl);
+    t = tl + HUFT_IDX(bl);
     e = t->e;
-
     if (e > 16) {
       do {
-        if (e == 99) { s.w = w; *sp = s; return 1; }
-        DUMPBITS(s, t->b);
+        if (e == 99) return 1;
+        DUMPBITS(t->b);
         e -= 16;
-        NEEDBITS(s, e);
-        t = t->v.t + HUFT_IDX(s, e);
+        NEEDBITS(e);
+        t = t->v.t + HUFT_IDX(e);
       } while ((e = t->e) > 16);
     }
-    DUMPBITS(s, t->b);
+    DUMPBITS(t->b);
 
     if (e == 16) {
       slide[w++] = (uch)t->v.n;
       Tracevv((stderr, "%c", slide[w-1]));
       if (w == WSIZE) { flush_output(w); w = 0; }
-
     } else {
       if (e == 15) break;
 
-      NEEDBITS(s, e);
-      n = t->v.n + PEEKBITS(s, e);
-      DUMPBITS(s, e);
+      NEEDBITS(e);
+      n = t->v.n + (b & mask_bits[e]);
+      DUMPBITS(e);
 
-      NEEDBITS(s, bd);
-      t = td + HUFT_IDX(s, bd);
+      NEEDBITS(bd);
+      t = td + HUFT_IDX(bd);
       e = t->e;
       if (e > 16) {
         do {
-          if (e == 99) { s.w = w; *sp = s; return 1; }
-          DUMPBITS(s, t->b);
+          if (e == 99) return 1;
+          DUMPBITS(t->b);
           e -= 16;
-          NEEDBITS(s, e);
-          t = t->v.t + HUFT_IDX(s, e);
+          NEEDBITS(e);
+          t = t->v.t + HUFT_IDX(e);
         } while ((e = t->e) > 16);
       }
-      DUMPBITS(s, t->b);
-      NEEDBITS(s, e);
-      d = w - t->v.n - PEEKBITS(s, e);
-      DUMPBITS(s, e);
+      DUMPBITS(t->b);
+      NEEDBITS(e);
+      d = w - t->v.n - (b & mask_bits[e]);
+      DUMPBITS(e);
       Tracevv((stderr, "\\[%d,%d]", w-d, n));
 
       do {
-        d &= WSIZE - 1;
-        e = WSIZE - (d > w ? d : w);
-        if (e > n) e = n;
-        n -= e;
+        n -= (e = (e = WSIZE - ((d &= WSIZE-1) > w ? d : w)) > n ? n : e);
 #ifndef DEBUG
         if (e <= (d < w ? w - d : d - w)) {
           memcpy(slide + w, slide + d, e);
@@ -310,48 +273,44 @@ inflate_codes(bstate_t *sp, struct huft *tl, struct huft *td, int bl, int bd)
     }
   }
 
-  s.w = w;
-  *sp = s;
+  wp = w; bb = b; bk = k;
   return 0;
 }
 
 static int
-inflate_stored(bstate_t *sp)
+inflate_stored(void)
 {
   unsigned n;
-  bstate_t s = *sp;
-  unsigned w = s.w;
+  unsigned w;
+  uint32_t b;
+  unsigned k;
 
-  {
-    unsigned leftover = cfu_bk(s.bs) & 7u;
-    DUMPBITS(s, leftover);
-  }
+  b = bb; k = bk; w = wp;
 
-  NEEDBITS(s, 16);
-  n = PEEKBITS(s, 16);
-  DUMPBITS(s, 16);
+  n = k & 7;
+  DUMPBITS(n);
 
-  NEEDBITS(s, 16);
-  if (n != (unsigned)((~PEEKBITS(s, 16)) & 0xffffu)) {
-    s.w = w; *sp = s;
+  NEEDBITS(16);
+  n = (unsigned)b & 0xffff;
+  DUMPBITS(16);
+  NEEDBITS(16);
+  if (n != (unsigned)((~b) & 0xffff))
     return 1;
-  }
-  DUMPBITS(s, 16);
+  DUMPBITS(16);
 
   while (n--) {
-    NEEDBITS(s, 8);
-    slide[w++] = (uch)PEEKBITS(s, 8);
+    NEEDBITS(8);
+    slide[w++] = (uch)b;
     if (w == WSIZE) { flush_output(w); w = 0; }
-    DUMPBITS(s, 8);
+    DUMPBITS(8);
   }
 
-  s.w = w;
-  *sp = s;
+  wp = w; bb = b; bk = k;
   return 0;
 }
 
 static int
-inflate_fixed(bstate_t *sp)
+inflate_fixed(void)
 {
   int i;
   struct huft *tl, *td;
@@ -373,40 +332,44 @@ inflate_fixed(bstate_t *sp)
     return i;
   }
 
-  i = inflate_codes(sp, tl, td, bl, bd) ? 1 : 0;
+  if (inflate_codes(tl, td, bl, bd)) return 1;
 
   huft_free(tl);
   huft_free(td);
-  return i;
+  return 0;
 }
 
 static int
-inflate_dynamic(bstate_t *sp)
+inflate_dynamic(void)
 {
   int i;
-  unsigned j, l, m, n;
+  unsigned j;
+  unsigned l;
+  unsigned m;
+  unsigned n;
+  unsigned w;
   struct huft *tl, *td;
   int bl, bd;
   unsigned nb, nl, nd;
 #ifdef PKZIP_BUG_WORKAROUND
-  unsigned ll[288 + 32];
+  unsigned ll[288+32];
 #else
-  unsigned ll[286 + 30];
+  unsigned ll[286+30];
 #endif
-  bstate_t s = *sp;
-  unsigned w = s.w;
+  uint32_t b;
+  unsigned k;
 
-  NEEDBITS(s, 5);
-  nl = 257 + PEEKBITS(s, 5);
-  DUMPBITS(s, 5);
+  b = bb; k = bk; w = wp;
 
-  NEEDBITS(s, 5);
-  nd = 1 + PEEKBITS(s, 5);
-  DUMPBITS(s, 5);
-
-  NEEDBITS(s, 4);
-  nb = 4 + PEEKBITS(s, 4);
-  DUMPBITS(s, 4);
+  NEEDBITS(5);
+  nl = 257 + ((unsigned)b & 0x1f);
+  DUMPBITS(5);
+  NEEDBITS(5);
+  nd = 1 + ((unsigned)b & 0x1f);
+  DUMPBITS(5);
+  NEEDBITS(4);
+  nb = 4 + ((unsigned)b & 0xf);
+  DUMPBITS(4);
 
 #ifdef PKZIP_BUG_WORKAROUND
   if (nl > 288 || nd > 32)
@@ -416,14 +379,13 @@ inflate_dynamic(bstate_t *sp)
     return 1;
 
   for (j = 0; j < nb; j++) {
-    NEEDBITS(s, 3);
-    ll[border[j]] = PEEKBITS(s, 3);
-    DUMPBITS(s, 3);
+    NEEDBITS(3);
+    ll[border[j]] = (unsigned)b & 7;
+    DUMPBITS(3);
   }
-  for (; j < 19; j++)
-    ll[border[j]] = 0;
+  for (; j < 19; j++) ll[border[j]] = 0;
 
-  wp = w;
+  bb = b; bk = k; wp = w;
 
   bl = 7;
   if ((i = huft_build(ll, 19, 19, NULL, NULL, &tl, &bl)) != 0) {
@@ -432,43 +394,38 @@ inflate_dynamic(bstate_t *sp)
   }
   if (tl == NULL) return 2;
 
+  b = bb; k = bk; w = wp;
+
   n = nl + nd;
   m = mask_bits[bl];
-  (void)m;
   i = l = 0;
-
   while ((unsigned)i < n) {
     struct huft *td_tmp;
-
-    NEEDBITS(s, bl);
-    td_tmp = tl + HUFT_IDX(s, bl);
+    NEEDBITS(bl);
+    td_tmp = tl + HUFT_IDX(bl);
     j = td_tmp->b;
-    DUMPBITS(s, j);
+    DUMPBITS(j);
     j = td_tmp->v.n;
-
     if (j < 16) {
       ll[i++] = l = j;
-
     } else if (j == 16) {
-      NEEDBITS(s, 2);
-      j = 3 + PEEKBITS(s, 2);
-      DUMPBITS(s, 2);
-      if ((unsigned)i + j > n) { huft_free(tl); return 1; }
+      NEEDBITS(2);
+      j = 3 + ((unsigned)b & 3);
+      DUMPBITS(2);
+      if ((unsigned)i + j > n) return 1;
       while (j--) ll[i++] = l;
-
     } else if (j == 17) {
-      NEEDBITS(s, 3);
-      j = 3 + PEEKBITS(s, 3);
-      DUMPBITS(s, 3);
-      if ((unsigned)i + j > n) { huft_free(tl); return 1; }
+      NEEDBITS(3);
+      j = 3 + ((unsigned)b & 7);
+      DUMPBITS(3);
+      if ((unsigned)i + j > n) return 1;
       while (j--) ll[i++] = 0;
       l = 0;
-
     } else {
-      NEEDBITS(s, 7);
-      j = 11 + PEEKBITS(s, 7);
-      DUMPBITS(s, 7);
-      if ((unsigned)i + j > n) { huft_free(tl); return 1; }
+      NEEDBITS(7);
+      j = 11 + ((unsigned)b & 0x7f);
+      DUMPBITS(7);
+      if ((unsigned)i + j > n) return 1;
       while (j--) ll[i++] = 0;
       l = 0;
     }
@@ -476,7 +433,7 @@ inflate_dynamic(bstate_t *sp)
 
   huft_free(tl);
 
-  wp = w;
+  bb = b; bk = k; wp = w;
 
   bl = lbits;
   if ((i = huft_build(ll, nl, 257, cplens, cplext, &tl, &bl)) != 0) {
@@ -486,7 +443,6 @@ inflate_dynamic(bstate_t *sp)
     }
     return i;
   }
-
   bd = dbits;
   if ((i = huft_build(ll + nl, nd, 0, cpdist, cpdext, &td, &bd)) != 0) {
     if (i == 1) {
@@ -502,12 +458,12 @@ inflate_dynamic(bstate_t *sp)
 #endif
   }
 
-  s.w = w;
+  b = bb; k = bk; w = wp;
+
   {
-    int err = inflate_codes(&s, tl, td, bl, bd) ? 1 : 0;
+    int err = inflate_codes(tl, td, bl, bd) ? 1 : 0;
     huft_free(tl);
     huft_free(td);
-    *sp = s;
     return err;
   }
 }
@@ -516,33 +472,26 @@ static int
 inflate_block(int *e)
 {
   unsigned t;
-  bstate_t s;
-  int r;
+  unsigned w;
+  uint32_t b;
+  unsigned k;
 
-  s = bs_from_globals();
+  b = bb; k = bk; w = wp;
 
-  unsigned w = s.w;
+  NEEDBITS(1);
+  *e = (int)b & 1;
+  DUMPBITS(1);
 
-  NEEDBITS(s, 1);
-  *e = (int)PEEKBITS(s, 1);
-  DUMPBITS(s, 1);
+  NEEDBITS(2);
+  t = (unsigned)b & 3;
+  DUMPBITS(2);
 
-  NEEDBITS(s, 2);
-  t = PEEKBITS(s, 2);
-  DUMPBITS(s, 2);
+  bb = b; bk = k; wp = w;
 
-  bs_to_globals(s);
-  s = bs_from_globals();
-
-  switch (t) {
-    case 0: r = inflate_stored (&s); break;
-    case 1: r = inflate_fixed  (&s); break;
-    case 2: r = inflate_dynamic(&s); break;
-    default: return 2;
-  }
-
-  bs_to_globals(s);
-  return r;
+  if (t == 2) return inflate_dynamic();
+  if (t == 0) return inflate_stored();
+  if (t == 1) return inflate_fixed();
+  return 2;
 }
 
 int
@@ -552,23 +501,16 @@ gzip_inflate(void)
   int r;
   unsigned h;
 
-  wp = 0;
-  bk = 0;
-  bb = 0;
+  wp = 0; bk = 0; bb = 0;
 
   h = 0;
   do {
     hufts = 0;
-    if ((r = inflate_block(&e)) != 0)
-      return r;
-    if (hufts > h)
-      h = hufts;
+    if ((r = inflate_block(&e)) != 0) return r;
+    if (hufts > h) h = hufts;
   } while (!e);
 
-  while (bk >= 8) {
-    bk -= 8;
-    inptr--;
-  }
+  while (bk >= 8) { bk -= 8; inptr--; }
 
   flush_output(wp);
   Trace((stderr, "<%u> ", h));
