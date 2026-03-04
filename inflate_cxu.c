@@ -647,6 +647,8 @@ static int
 inflate_block(int *e)
 {
   unsigned t;
+  unsigned w;
+
   BS_DECL();
 
   BS_INIT();
