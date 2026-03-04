@@ -1,42 +1,63 @@
-#pragma once
-#ifndef CXU_HELPERS_H
-#define CXU_HELPERS_H
+#ifndef CFU_INFLATE_H
+#define CFU_INFLATE_H
 
+#include <stdint.h>
 #include "cfu.h"
-#include "cxu_runtime.h"
 
-/* ==========================================================================
-   CXU helper wrappers
-   ========================================================================== */
-static inline unsigned cxu_bitrev(unsigned n)
-{
-  return (unsigned)cfu_op0(0, (uint32_t)n, 0u);
+static inline uint32_t cfu_pack(uint32_t bb, uint32_t bk) {
+    return cfu_op6_hw(0, bb, bk);
 }
 
-/* FN 0 — mask: returns (1 << n) - 1 */
-static inline unsigned cxu_mask(unsigned n)
-{
-  return (unsigned)cfu_op2(0, (uint32_t)n, 0u);
+static inline uint32_t cfu_bb(uint32_t state) {
+    return cfu_op7_hw(0, state, 0);
 }
 
-/* FN 1 — huft_idx: returns (unsigned)(b & ((1 << bl) - 1))
-   This is the dominant operation in inflate_codes(); every Huffman symbol
-   decode performs exactly this before indexing the lookup table.           */
-static inline unsigned cxu_huft_idx(ulg b, unsigned bl)
-{
-  return (unsigned)cfu_op3(0, (uint32_t)b, (uint32_t)bl);
+static inline uint32_t cfu_bk(uint32_t state) {
+    return cfu_op7_hw(0, state, 1);
 }
 
-/* FN 3 — copy_addr: fused back-reference address
-   Returns (w - dist_base - extra_val) & 0x7FFF in bits [15:0].            */
-static inline unsigned cxu_copy_addr(unsigned w, unsigned dist_base,
-                                     unsigned extra_val)
-{
-  uint32_t rs1 = ((uint32_t)(w         & 0xFFFFu) << 16)
-               |  (uint32_t)(dist_base  & 0xFFFFu);
-  uint32_t result = (uint32_t)cfu_op4(0, rs1, (uint32_t)(extra_val & 0xFFFFu));
-  return (unsigned)(result & 0x7FFFu);
+static inline uint32_t cfu_load_byte(uint32_t state, uint8_t byte) {
+    return cfu_op0_hw(0, state, (uint32_t)byte);
 }
 
+static inline uint32_t cfu_peek(uint32_t state, uint32_t n) {
+    return cfu_op1_hw(0, state, n);
+}
 
-#endif
+static inline uint32_t cfu_dump(uint32_t state, uint32_t n) {
+    return cfu_op2_hw(0, state, n);
+}
+
+static inline uint32_t cfu_need_check(uint32_t state, uint32_t n) {
+    return cfu_op3_hw(0, state, n);
+}
+
+static inline uint32_t cfu_huft_idx(uint32_t bb, uint32_t bl) {
+    return cfu_op4_hw(0, bb, bl);
+}
+
+static inline uint32_t cfu_slide_wrap(uint32_t w, uint32_t inc) {
+    return cfu_op5_hw(0, w, inc);
+}
+
+#define BS_DECL()       uint32_t _bs
+#define BS_INIT()       (_bs = cfu_pack(bb, bk))
+#define BS_SAVE()       do { bb = cfu_bb(_bs); bk = cfu_bk(_bs); } while (0)
+
+#define NEEDBITS_HW(n)  \
+    while (cfu_need_check(_bs, (n))) { \
+        _bs = cfu_load_byte(_bs, NEXTBYTE()); \
+    }
+
+#define DUMPBITS_HW(n)  (_bs = cfu_dump(_bs, (n)))
+
+#define PEEKBITS_HW(n)  cfu_peek(_bs, (n))
+
+#define NEEDPEEK_HW(n)  (NEEDBITS_HW(n), PEEKBITS_HW(n))
+
+#define HUFT_IDX_HW(bl) cfu_huft_idx(cfu_bb(_bs), (bl))
+
+#define SLIDE_WRAP_HW(w, inc) cfu_slide_wrap((w), (inc))
+
+
+#endif /* CFU_INFLATE_H */
