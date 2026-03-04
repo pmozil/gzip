@@ -25,7 +25,7 @@
 
 #include "tailor.h"
 #include "gzip.h"
-#include "cxu_helpers.h"
+#include "cxu_opt_funcs.h"
 
 #define slide window
 
