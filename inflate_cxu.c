@@ -120,6 +120,9 @@
 
 #include "tailor.h"
 #include "gzip.h"
+
+#include "cxu_opt_funcs.h"
+
 #define slide window
 
 /* Huffman code lookup table entry--this entry is four bytes for machines
