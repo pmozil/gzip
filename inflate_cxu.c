@@ -970,8 +970,10 @@ gzip_inflate ()
   h = 0;
   do {
     hufts = 0;
-    if ((r = inflate_block(&e)) != 0)
+    if ((r = inflate_block(&e)) != 0) {
+      printf("VALUE = %d\n", r);
       return r;
+    }
     if (hufts > h)
       h = hufts;
   } while (!e);
